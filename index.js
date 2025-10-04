@@ -350,6 +350,7 @@ Focus on Kenyan scam patterns from the training data. Be strict with financial r
 }
 
 // 🛡️ TAKE ACTION ON MESSAGE
+// 🛡️ TAKE ACTION ON MESSAGE - FIXED VERSION
 async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
   const from = message.key.remoteJid;
   const sender = message.key.participant || from;
@@ -365,15 +366,21 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
 
   // Check if bot is admin in the group
   const groupMetadata = await sock.groupMetadata(from);
-  const botId = normalizeJid(sock.user.id);
+  
+  // Use ADMIN_JID_CHECK as the bot's JID (the account that's logged in)
+  const botJid = normalizeJid(ADMIN_JID_CHECK);
+  
   const isBotAdmin = groupMetadata.participants.some(
-    p => normalizeJid(p.id) === botId && (p.admin === "admin" || p.admin === "superadmin")
+    p => normalizeJid(p.id) === botJid && (p.admin === "admin" || p.admin === "superadmin")
   );
 
+  console.log(`🔍 Bot JID: ${botJid}`);
+  console.log(`🔍 Is Bot Admin: ${isBotAdmin}`);
+
   if (!isBotAdmin) {
-    console.log("❌ Bot is not admin, cannot take action");
+    console.log("❌ Bot is not admin in this group, cannot take action");
     await sock.sendMessage(ADMIN_JID_SEND, {
-      text: `⚠️ Spam detected but I'm not admin in group "${groupMetadata.subject}"\n\nMessage: ${messageText}\n\nSpam Score: ${localAnalysis.score}\nFlags: ${localAnalysis.flags.join(', ')}`
+      text: `⚠️ *SPAM DETECTED* (Cannot Act)\n\n*Group:* ${groupMetadata.subject}\n*Bot Status:* ❌ Not Admin\n\n*Action Required:* Make ${botJid} an admin in this group to enable spam deletion and user removal.\n\n*Spam Score:* ${localAnalysis.score}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*From:* ${sender}\n*Message:* ${messageText}`
     });
     return;
   }
@@ -408,7 +415,7 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
 
       // Notify admin
       await sock.sendMessage(ADMIN_JID_SEND, {
-        text: `🚨 *CRITICAL SPAM ALERT*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Action:* Message deleted & user removed\n*Risk Level:* ${finalAnalysis.riskLevel}\n*Local Score:* ${localAnalysis.score}\n*Reason:* ${finalAnalysis.reason}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*Message:* ${messageText}`
+        text: `🚨 *CRITICAL SPAM ALERT*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Action:* ✅ Message deleted & user removed\n*Risk Level:* ${finalAnalysis.riskLevel}\n*Local Score:* ${localAnalysis.score}\n*Reason:* ${finalAnalysis.reason}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*Message:* ${messageText}`
       });
 
     } 
@@ -453,7 +460,7 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
   } catch (error) {
     console.error("❌ Error taking action on spam:", error);
     await sock.sendMessage(ADMIN_JID_SEND, {
-      text: `❌ Failed to take action on spam message:\n\n${error.message}\n\n*Original Message:* ${messageText}`
+      text: `❌ *Failed to take action on spam*\n\n*Error:* ${error.message}\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n\n*Original Message:* ${messageText}`
     });
   }
 }
@@ -496,57 +503,83 @@ async function startWhatsApp() {
   });
 
   // 💬 MESSAGE PROCESSING WITH SPAM DETECTION
-  sock.ev.on("messages.upsert", async (m) => {
-    const msg = m.messages[0];
-    if (!msg.message || !msg.key.remoteJid) return;
+  // 💬 FIXED MESSAGE PROCESSING WITH SPAM DETECTION
+sock.ev.on("messages.upsert", async (m) => {
+  const msg = m.messages[0];
+  if (!msg.message || !msg.key.remoteJid) return;
 
-    const from = msg.key.remoteJid;
-    const sender = msg.key.participant || from;
+  const from = msg.key.remoteJid;
+  const sender = msg.key.participant || from;
 
-    // Ignore messages from ourselves and from private chats
-    if (sender.includes(sock.user.id) || !from.endsWith('@g.us')) {
-      return;
-    }
+  // Ignore messages from ourselves (bot's own messages)
+  if (msg.key.fromMe) {
+    return;
+  }
 
-    const text = msg.message.conversation ||
-                msg.message.extendedTextMessage?.text ||
-                "";
+  const text = msg.message.conversation ||
+              msg.message.extendedTextMessage?.text ||
+              "";
 
-    // 🧠 ADMIN COMMANDS
-    if (sender === ADMIN_JID_SEND) {
+  // 🧠 HANDLE PRIVATE MESSAGES (DMs) - Including Admin Commands
+  if (!from.endsWith('@g.us')) {
+    console.log(`📩 Private message from ${sender}: ${text.substring(0, 50)}...`);
+    
+    // Check if it's from admin
+    if (normalizeJid(sender) === normalizeJid(ADMIN_JID_SEND)) {
       const command = text.toLowerCase().trim();
+      
       if (command === "list groups") {
+        console.log("✅ Processing 'list groups' command");
         await sendGroupListToAdmin();
-      } else if (command === "spam stats") {
-        await sendSpamStats();
-      } else if (command === "test local") {
-        await testLocalDetection(text.replace("test local", "").trim());
-      }
-      return;
-    }
-
-    // 🛡️ SPAM DETECTION FOR GROUP MESSAGES
-    if (from.endsWith('@g.us') && text.trim().length > 0) {
-      console.log(`📨 Message in group from ${sender}: ${text.substring(0, 50)}...`);
-      
-      // Step 1: Local spam check with trained algorithm
-      const localAnalysis = localSpamCheck(text, sender);
-      
-      // Step 2: Decision tree based on local analysis
-      if (localAnalysis.isHighConfidenceSpam) {
-        console.log("🚨 High confidence spam detected, taking immediate action...");
-        await handleSpamMessage(msg, localAnalysis, null);
+        return;
       } 
-      else if (localAnalysis.isSuspicious) {
-        console.log("🔍 Suspicious message detected, sending to Gemini...");
-        const geminiAnalysis = await analyzeWithGemini(text, localAnalysis);
-        
-        // Step 3: Take action based on combined analysis
-        await handleSpamMessage(msg, localAnalysis, geminiAnalysis);
+      else if (command === "spam stats") {
+        console.log("✅ Processing 'spam stats' command");
+        await sendSpamStats();
+        return;
+      } 
+      else if (command.startsWith("test local ")) {
+        console.log("✅ Processing 'test local' command");
+        await testLocalDetection(text.replace("test local", "").trim());
+        return;
       }
-      // Messages with score < 45 are allowed automatically
+      else {
+        // Unknown command from admin
+        console.log(`⚠️ Unknown command from admin: ${command}`);
+        await sock.sendMessage(ADMIN_JID_SEND, {
+          text: `❓ Unknown command. Available commands:\n\n• *list groups* — See all groups\n• *spam stats* — Protection statistics\n• *test local <message>* — Test detection`
+        });
+        return;
+      }
     }
-  });
+    
+    // Not from admin, ignore other private messages
+    console.log(`⚠️ Ignoring private message from non-admin: ${sender}`);
+    return;
+  }
+
+  // 🛡️ SPAM DETECTION FOR GROUP MESSAGES ONLY
+  if (text.trim().length === 0) return; // Ignore empty messages
+
+  console.log(`📨 Message in group from ${sender}: ${text.substring(0, 50)}...`);
+  
+  // Step 1: Local spam check with trained algorithm
+  const localAnalysis = localSpamCheck(text, sender);
+  
+  // Step 2: Decision tree based on local analysis
+  if (localAnalysis.isHighConfidenceSpam) {
+    console.log("🚨 High confidence spam detected, taking immediate action...");
+    await handleSpamMessage(msg, localAnalysis, null);
+  } 
+  else if (localAnalysis.isSuspicious) {
+    console.log("🔍 Suspicious message detected, sending to Gemini...");
+    const geminiAnalysis = await analyzeWithGemini(text, localAnalysis);
+    
+    // Step 3: Take action based on combined analysis
+    await handleSpamMessage(msg, localAnalysis, geminiAnalysis);
+  }
+  // Messages with score < 45 are allowed automatically
+});
 
   sock.ev.on("creds.update", saveCreds);
 }
