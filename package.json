@@ -10,6 +10,7 @@
   "author": "Dennis Muuo",
   "license": "ISC",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@whiskeysockets/baileys": "^6.7.20",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
