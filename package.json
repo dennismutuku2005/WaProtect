@@ -1,0 +1,12 @@
+{
+  "name": "waprotect",
+  "version": "1.0.0",
+  "description": "WA Protect is an intelligent AI agent built to keep your WhatsApp groups safe, organized, and spam-free. Once added to a group and activated through subscription, WA Protect continuously analyzes messages and user behavior using AI to maintain a clean and healthy chat environment.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Dennis Muuo",
+  "license": "ISC"
+}
