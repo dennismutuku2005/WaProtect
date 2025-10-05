@@ -26,7 +26,7 @@ let pingInterval;
 let genAI;
 let geminiModel;
 
-// ✅ INITIALIZE GEMINI AI - FIXED
+// ✅ INITIALIZE GEMINI AI
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   geminiModel = genAI.getGenerativeModel({ 
@@ -53,6 +53,26 @@ function normalizeJid(jid) {
 function localSpamCheck(messageText, senderInfo) {
   const text = messageText.toLowerCase().trim();
   
+  // 🎯 LEGITIMACY INDICATORS (reduce false positives)
+  const legitimacyIndicators = {
+    trustedDomains: [
+      /forms\.gle|forms\.google\.com/i,
+      /bit\.ly|tinyurl\.com/i,
+      /zoom\.us|meet\.google\.com/i,
+      /\.edu|\.ac\.ke/i
+    ],
+    campusLanguage: [
+      /trade fair|exhibition|campus|university|college|student/i,
+      /agm|annual general meeting/i,
+      /biashara|hustler|entrepreneurship/i
+    ],
+    humorMarkers: [
+      /plc|limited|international|empire/i,
+      /😂|😁|🤣|😅/g,
+      /vibes|laughter|exposure/i
+    ]
+  };
+
   const trainedPatterns = {
     spoofedOrgs: [
       /unicef foundation/i,
@@ -113,12 +133,46 @@ function localSpamCheck(messageText, senderInfo) {
     recommendedAction: "allow"
   };
 
+  // 🎯 CHECK FOR LEGITIMACY INDICATORS FIRST
+  let legitimacyScore = 0;
+  
+  legitimacyIndicators.trustedDomains.forEach(pattern => {
+    if (pattern.test(text)) {
+      legitimacyScore += 15;
+      details.detectedPatterns.push(`Trusted domain detected`);
+    }
+  });
+
+  legitimacyIndicators.campusLanguage.forEach(pattern => {
+    if (pattern.test(text)) {
+      legitimacyScore += 10;
+      details.detectedPatterns.push(`Campus event language detected`);
+    }
+  });
+
+  const laughEmojis = (text.match(/😂|😁|🤣|😅/g) || []).length;
+  if (laughEmojis >= 3) {
+    legitimacyScore += 20;
+    details.detectedPatterns.push(`High humor content (${laughEmojis} laugh emojis)`);
+  }
+
+  legitimacyIndicators.humorMarkers.forEach(pattern => {
+    if (pattern.test(text)) {
+      legitimacyScore += 5;
+    }
+  });
+
+  const legitimacyBonus = legitimacyScore > 30 ? 30 : legitimacyScore;
+  if (legitimacyBonus > 0) {
+    console.log(`✅ Legitimacy bonus: ${legitimacyBonus} points (reduces spam score)`);
+  }
+
   // Pattern detection
   trainedPatterns.spoofedOrgs.forEach((pattern) => {
     if (pattern.test(text)) {
       spamScore += 35;
       flags.push('organization_impersonation');
-      details.detectedPatterns.push(`Spoofed organization: ${pattern}`);
+      details.detectedPatterns.push(`Spoofed organization`);
     }
   });
 
@@ -161,9 +215,17 @@ function localSpamCheck(messageText, senderInfo) {
   const hasPersonalEmails = text.match(trainedPatterns.contactPatterns[3]);
 
   if (hasUrls) {
-    spamScore += 20;
-    flags.push('suspicious_links');
-    details.detectedPatterns.push(`Contains URLs: ${hasUrls.length}`);
+    const isTrustedUrl = legitimacyIndicators.trustedDomains.some(pattern => 
+      hasUrls.some(url => pattern.test(url))
+    );
+    
+    if (!isTrustedUrl) {
+      spamScore += 20;
+      flags.push('suspicious_links');
+      details.detectedPatterns.push(`Contains URLs: ${hasUrls.length}`);
+    } else {
+      console.log(`✅ Trusted URL detected, not penalized`);
+    }
   }
 
   if (hasPhoneNumbers) {
@@ -235,7 +297,7 @@ function localSpamCheck(messageText, senderInfo) {
   return result;
 }
 
-// 🤖 GEMINI AI ANALYSIS - FIXED VERSION FROM test.js
+// 🤖 GEMINI AI ANALYSIS
 async function analyzeWithGemini(messageText, localAnalysis) {
   console.log("🔍 Gemini function called");
   
@@ -258,26 +320,34 @@ LOCAL ANALYSIS:
 - Flags: ${localAnalysis.flags.join(', ')}
 - Patterns: ${localAnalysis.details.detectedPatterns.join('; ')}
 
+CONTEXT AWARENESS:
+- Campus/school events with registration are usually LEGITIMATE
+- Google Forms links (forms.gle) are TRUSTED
+- Humor and satire (emojis, jokes) indicate LEGITIMATE content
+- Messages asking people to PAY TO SELL at trade fairs are LEGITIMATE business events
+- "ROI" jokes in context of campus hustles are SATIRICAL, not scam promises
+
 RETURN THIS EXACT JSON FORMAT:
 {
-  "isSpam": true,
+  "isSpam": false,
   "isAdvertisement": false,
   "isFinancialScam": false, 
   "isOrganizationImpersonation": false,
   "confidence": 0.85,
-  "action": "delete_immediate",
+  "action": "allow",
   "reason": "Brief explanation",
-  "category": "financial_scam",
-  "riskLevel": "critical",
-  "matchedPatterns": ["pattern1", "pattern2"]
+  "category": "legitimate",
+  "riskLevel": "low",
+  "matchedPatterns": []
 }
 
 RULES:
 - Return ONLY the JSON object, no markdown, no extra text
 - Use double quotes for all strings
-- "delete_immediate" for financial scams, PIN requests, org impersonation
-- Focus on Kenyan scam patterns
--And if its an event or school related message, classify as legitimate
+- "delete_immediate" ONLY for: actual money requests, PIN/password requests, fake organization impersonation with urgency
+- "allow" for: campus events, trade fairs, legitimate registrations, humor/satire
+- Consider CONTEXT - not all mentions of money are scams
+- Focus on INTENT: Is this trying to STEAL money or legitimately asking for event registration?
 `;
 
   try {
@@ -360,10 +430,6 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
 
   console.log(`🛡️ Processing message from ${sender}: ${messageText.substring(0, 50)}...`);
 
-  spamStats.totalProcessed++;
-  if (localAnalysis.isSuspicious) spamStats.localFlagged++;
-  if (geminiAnalysis) spamStats.geminiAnalyzed++;
-
   const groupMetadata = await sock.groupMetadata(from);
   const botJid = normalizeJid(ADMIN_JID_CHECK);
   
@@ -395,11 +461,9 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
       
       await sock.sendMessage(from, { delete: message.key });
       console.log("✅ Deleted high-risk spam message");
-      spamStats.messagesDeleted++;
 
       await sock.groupParticipantsUpdate(from, [sender], "remove");
       console.log(`🚫 Removed user ${sender} from group`);
-      spamStats.usersRemoved++;
 
       await sock.sendMessage(ADMIN_JID_SEND, {
         text: `🚨 *CRITICAL SPAM ALERT*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Action:* ✅ Message deleted & user removed\n*Risk Level:* ${finalAnalysis.riskLevel}\n*Local Score:* ${localAnalysis.score}\n*Reason:* ${finalAnalysis.reason}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*Message:* ${messageText}`
@@ -412,7 +476,6 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
       
       await sock.sendMessage(from, { delete: message.key });
       console.log("✅ Deleted spam message");
-      spamStats.messagesDeleted++;
 
       await sock.sendMessage(ADMIN_JID_SEND, {
         text: `🗑️ *Spam Message Deleted*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Risk Level:* ${finalAnalysis.riskLevel}\n*Score:* ${localAnalysis.score}\n*Reason:* ${finalAnalysis.reason}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*Message:* ${messageText}`
@@ -425,7 +488,6 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
       await sock.sendMessage(from, {
         text: `⚠️ *Community Guidelines Reminder*\n\nPlease avoid sending promotional content, financial offers, or suspicious links in this group. Repeated violations may result in removal.\n\n*Detected:* ${finalAnalysis.reason}`
       });
-      spamStats.warningsSent++;
       
       await sock.sendMessage(ADMIN_JID_SEND, {
         text: `⚠️ *Warning Sent for Suspicious Message*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Risk Level:* ${finalAnalysis.riskLevel}\n*Score:* ${localAnalysis.score}\n*Reason:* ${finalAnalysis.reason}\n\n*Message:* ${messageText}`
@@ -505,17 +567,13 @@ async function startWhatsApp() {
           await sendGroupListToAdmin();
           return;
         } 
-        else if (command === "spam stats") {
-          await sendSpamStats();
-          return;
-        } 
         else if (command.startsWith("test local ")) {
           await testLocalDetection(text.replace("test local", "").trim());
           return;
         }
         else {
           await sock.sendMessage(ADMIN_JID_SEND, {
-            text: `❓ Unknown command. Available commands:\n\n• *list groups* — See all groups\n• *spam stats* — Protection statistics\n• *test local <message>* — Test detection`
+            text: `❓ Unknown command. Available commands:\n\n• *list groups* — See all groups\n• *test local <message>* — Test detection`
           });
           return;
         }
@@ -560,41 +618,6 @@ function setupPingInterval() {
       }
     }
   }, PING_INTERVAL);
-}
-
-// 📊 SPAM STATISTICS
-let spamStats = {
-  totalProcessed: 0,
-  localFlagged: 0,
-  geminiAnalyzed: 0,
-  messagesDeleted: 0,
-  usersRemoved: 0,
-  warningsSent: 0,
-  efficiency: 0
-};
-
-async function sendSpamStats() {
-  if (!sock || !isConnected) return;
-  
-  spamStats.efficiency = spamStats.totalProcessed > 0 ? 
-    ((spamStats.localFlagged / spamStats.totalProcessed) * 100).toFixed(1) : 0;
-
-  const statsMessage = `📊 *Spam Protection Stats*\n
-🤖 *Local Detection Engine*
-Total Messages Processed: ${spamStats.totalProcessed}
-Locally Flagged: ${spamStats.localFlagged}
-Gemini Analyses: ${spamStats.geminiAnalyzed}
-
-🛡️ *Actions Taken*
-Messages Deleted: ${spamStats.messagesDeleted}
-Users Removed: ${spamStats.usersRemoved}
-Warnings Sent: ${spamStats.warningsSent}
-
-⚡ *Efficiency*
-Local Filter Rate: ${spamStats.efficiency}%
-API Call Savings: ~${(100 - (spamStats.geminiAnalyzed / spamStats.totalProcessed * 100)).toFixed(1)}%`;
-
-  await sock.sendMessage(ADMIN_JID_SEND, { text: statsMessage });
 }
 
 async function testLocalDetection(testMessage) {
@@ -687,7 +710,7 @@ async function sendGroupListToAdmin() {
 async function sendStartupMessage() {
   try {
     await sock.sendMessage(ADMIN_JID_SEND, {
-      text: `🤖 *WA Protect AI Agent v2.0 Online!*\n\n🛡️ *Enhanced Spam Protection*\n• Trained local detection algorithm\n• Gemini AI analysis for suspicious messages\n• Kenyan scam pattern recognition\n\n*Commands:*\n👉 *list groups* — See all groups\n👉 *spam stats* — Protection statistics\n👉 *test local <message>* — Test detection`
+      text: `🤖 *WA Protect AI Agent v2.0 Online!*\n\n🛡️ *Enhanced Spam Protection*\n• Trained local detection algorithm\n• Gemini AI analysis for suspicious messages\n• Kenyan scam pattern recognition\n\n*Commands:*\n👉 *list groups* — See all groups\n👉 *test local <message>* — Test detection`
     });
     console.log("✅ Sent startup message to admin.");
   } catch (error) {
@@ -700,8 +723,7 @@ app.get("/status", (req, res) => {
   res.json({
     connected: isConnected,
     status: isConnected ? "Ready" : "Connecting...",
-    timestamp: new Date().toISOString(),
-    spamStats: spamStats
+    timestamp: new Date().toISOString()
   });
 });
 
