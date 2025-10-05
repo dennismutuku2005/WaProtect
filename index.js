@@ -26,11 +26,11 @@ let pingInterval;
 let genAI;
 let geminiModel;
 
-// Initialize Gemini AI
+// ✅ INITIALIZE GEMINI AI - FIXED
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   geminiModel = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash-exp",
     generationConfig: {
       temperature: 0.1,
       topK: 1,
@@ -38,8 +38,9 @@ if (GEMINI_API_KEY) {
       maxOutputTokens: 1024,
     }
   });
+  console.log("✅ Gemini initialized successfully");
 } else {
-  console.warn("⚠️ GEMINI_API_KEY not found - AI features disabled");
+  console.log("⚠️ GEMINI_API_KEY not found - running with local detection only");
 }
 
 // ✅ Normalize JIDs
@@ -48,13 +49,11 @@ function normalizeJid(jid) {
   return jid.split(":")[0].replace("@s.whatsapp.net", "").replace("@lid", "");
 }
 
-// 🎯 TRAINED LOCAL SPAM DETECTION ALGORITHM
+// 🎯 LOCAL SPAM DETECTION ALGORITHM
 function localSpamCheck(messageText, senderInfo) {
   const text = messageText.toLowerCase().trim();
   
-  // 🚨 TRAINED PATTERNS FROM DATASET
   const trainedPatterns = {
-    // Organization impersonation
     spoofedOrgs: [
       /unicef foundation/i,
       /facebook foundation/i,
@@ -72,7 +71,6 @@ function localSpamCheck(messageText, senderInfo) {
       /corona relief fund/i
     ],
     
-    // Financial scam patterns
     financialScams: [
       /\b(50,000|50000|5,000|5000|1,200|1200|500|300|250|800|1,500|1500|450|600|400|2,000|2000|10,000|10000)\b/,
       /\b(ksh|kes|shilling|money|cash|grant|fund|bursary|scholarship|award|assistance|donation|relief)\b/i,
@@ -80,20 +78,17 @@ function localSpamCheck(messageText, senderInfo) {
       /\b(pay|send|transfer|deposit|mobile money|m-pesa|mpesa)\b/i
     ],
     
-    // Urgency and pressure tactics
     urgencyTactics: [
       /urgent|hurry|limited|now|immediate|quick|fast|don't miss|last chance|only few/i,
       /congratulations|selected|pre-approved|eligible|qualify|winner|chosen/i
     ],
     
-    // Data harvesting patterns
     dataHarvesting: [
       /\b(id|identification|student id|bank details|account number|mobile number|phone number|pin|password|address)\b/i,
       /\b(verify|confirm|validation|authentication|register|sign up|apply|submit)\b/i,
       /\b(form|application|document|upload|provide|enter|fill)\b/i
     ],
     
-    // Link and contact patterns
     contactPatterns: [
       /https?:\/\/[^\s]+|www\.[^\s]+|\.[a-z]{2,}\/[^\s]*/gi,
       /\+?[\d\s\-\(\)]{8,}|\d{8,}/g,
@@ -101,7 +96,6 @@ function localSpamCheck(messageText, senderInfo) {
       /gmail\.com|yahoo\.com|hotmail\.com/i
     ],
     
-    // Specific scam phrases from training data
     scamPhrases: [
       /child welfare grant|business grant|small business grant|cash assistance|relief package|support voucher/i,
       /free.*test kits|free.*business boosts|free.*airtime|free.*voucher/i,
@@ -119,18 +113,17 @@ function localSpamCheck(messageText, senderInfo) {
     recommendedAction: "allow"
   };
 
-  // 🔍 PATTERN 1: Organization Impersonation (High Severity)
-  trainedPatterns.spoofedOrgs.forEach((pattern, index) => {
+  // Pattern detection
+  trainedPatterns.spoofedOrgs.forEach((pattern) => {
     if (pattern.test(text)) {
       spamScore += 35;
       flags.push('organization_impersonation');
-      details.detectedPatterns.push(`Spoofed organization detected: ${pattern}`);
+      details.detectedPatterns.push(`Spoofed organization: ${pattern}`);
     }
   });
 
-  // 🔍 PATTERN 2: Financial Scam Indicators (High Severity)
   let financialFlags = 0;
-  trainedPatterns.financialScams.forEach((pattern, index) => {
+  trainedPatterns.financialScams.forEach((pattern) => {
     if (pattern.test(text)) {
       financialFlags++;
       spamScore += 20;
@@ -138,23 +131,21 @@ function localSpamCheck(messageText, senderInfo) {
   });
   if (financialFlags >= 2) {
     flags.push('financial_scam');
-    details.detectedPatterns.push(`Multiple financial scam indicators (${financialFlags} patterns)`);
+    details.detectedPatterns.push(`Financial scam indicators (${financialFlags} patterns)`);
   }
 
-  // 🔍 PATTERN 3: Urgency Tactics (Medium Severity)
   for (let i = 0; i < trainedPatterns.urgencyTactics.length; i++) {
     const pattern = trainedPatterns.urgencyTactics[i];
     if (pattern.test(text)) {
       spamScore += 15;
       flags.push('urgency_pressure');
-      details.detectedPatterns.push(`Urgency tactic: ${pattern}`);
-      break; // Only count once
+      details.detectedPatterns.push(`Urgency tactic detected`);
+      break;
     }
   }
 
-  // 🔍 PATTERN 4: Data Harvesting (High Severity)
   let dataFlags = 0;
-  trainedPatterns.dataHarvesting.forEach((pattern, index) => {
+  trainedPatterns.dataHarvesting.forEach((pattern) => {
     if (pattern.test(text)) {
       dataFlags++;
       spamScore += 25;
@@ -165,7 +156,6 @@ function localSpamCheck(messageText, senderInfo) {
     details.detectedPatterns.push(`Data harvesting attempt (${dataFlags} patterns)`);
   }
 
-  // 🔍 PATTERN 5: Contact & Link Analysis (Medium Severity)
   const hasUrls = text.match(trainedPatterns.contactPatterns[0]);
   const hasPhoneNumbers = text.match(trainedPatterns.contactPatterns[1]);
   const hasPersonalEmails = text.match(trainedPatterns.contactPatterns[3]);
@@ -188,39 +178,33 @@ function localSpamCheck(messageText, senderInfo) {
     details.detectedPatterns.push(`Uses personal email addresses`);
   }
 
-  // 🔍 PATTERN 6: Specific Scam Phrases (High Severity)
-  trainedPatterns.scamPhrases.forEach((pattern, index) => {
+  trainedPatterns.scamPhrases.forEach((pattern) => {
     if (pattern.test(text)) {
       spamScore += 30;
       flags.push('known_scam_phrase');
-      details.detectedPatterns.push(`Known scam phrase: ${pattern}`);
+      details.detectedPatterns.push(`Known scam phrase detected`);
     }
   });
 
-  // 🔍 PATTERN 7: Message Structure Analysis
   const words = text.split(/\s+/).length;
   
-  // Very short messages with financial terms
   if (words < 8 && financialFlags > 0) {
     spamScore += 10;
     flags.push('suspicious_short_message');
   }
 
-  // Multiple exclamation marks
   const exclamationCount = (text.match(/!/g) || []).length;
   if (exclamationCount > 2) {
     spamScore += 5;
     flags.push('excessive_exclamation');
   }
 
-  // ALL CAPS check
   const capsRatio = text.replace(/[^A-Z]/g, '').length / text.length;
   if (capsRatio > 0.5 && text.length > 15) {
     spamScore += 10;
     flags.push('excessive_caps');
   }
 
-  // 🎯 CONFIDENCE CALCULATION & DECISION
   spamScore = Math.min(spamScore, 100);
   
   if (spamScore >= 70) {
@@ -235,10 +219,10 @@ function localSpamCheck(messageText, senderInfo) {
   }
 
   const result = {
-    isSuspicious: spamScore >= 45, // Send to Gemini
-    isHighConfidenceSpam: spamScore >= 70, // Immediate action
+    isSuspicious: spamScore >= 45,
+    isHighConfidenceSpam: spamScore >= 70,
     score: spamScore,
-    flags: [...new Set(flags)], // Remove duplicates
+    flags: [...new Set(flags)],
     details,
     localDecision: details.recommendedAction
   };
@@ -251,106 +235,123 @@ function localSpamCheck(messageText, senderInfo) {
   return result;
 }
 
-// 🤖 GEMINI AI ANALYSIS WITH TRAINED PROMPT
+// 🤖 GEMINI AI ANALYSIS - FIXED VERSION FROM test.js
 async function analyzeWithGemini(messageText, localAnalysis) {
+  console.log("🔍 Gemini function called");
+  
   if (!geminiModel) {
-    console.log("⚠️ Gemini not available, using local analysis only");
-    return {
-      isSpam: localAnalysis.isHighConfidenceSpam,
-      isAdvertisement: localAnalysis.score > 50,
-      confidence: localAnalysis.score / 100,
-      action: localAnalysis.isHighConfidenceSpam ? 'delete' : 'allow',
-      reason: 'Gemini not available',
-      category: 'unknown',
-      riskLevel: localAnalysis.score >= 70 ? 'high' : 'medium'
-    };
+    console.log("❌ Gemini not initialized, using fallback");
+    return getFallbackAnalysis(localAnalysis, "Gemini not initialized");
   }
 
+  const cleanMessage = messageText.substring(0, 500);
+  
   const prompt = `
-You are an AI security analyst trained to detect Kenyan SMS/WhatsApp scams based on known patterns. Analyze this message and return ONLY valid JSON.
+CRITICAL: You MUST return ONLY valid JSON, no other text.
 
-TRAINING DATA PATTERNS TO CONSIDER:
-- Organization impersonation (UNICEF, Safaricom, WHO, etc.)
-- Financial scams with specific amounts (KSh1,200, KSh500, etc.)
-- Urgency tactics and false congratulations
-- Data harvesting (ID, bank details, MPESA PIN)
-- Suspicious links and personal contact requests
+Analyze this Kenyan WhatsApp message for spam/scam patterns:
 
-MESSAGE TO ANALYZE: "${messageText}"
+MESSAGE: "${cleanMessage}"
 
-LOCAL ANALYSIS RESULTS:
+LOCAL ANALYSIS:
 - Score: ${localAnalysis.score}/100
 - Flags: ${localAnalysis.flags.join(', ')}
-- Confidence: ${localAnalysis.details.confidence}
-- Detected Patterns: ${localAnalysis.details.detectedPatterns.join('; ')}
+- Patterns: ${localAnalysis.details.detectedPatterns.join('; ')}
 
-ANALYSIS CRITERIA:
-1. Check for organization impersonation from training data
-2. Look for financial amounts combined with fee requests
-3. Identify urgency pressure tactics
-4. Detect data harvesting attempts
-5. Evaluate link and contact safety
-
-RETURN STRICT JSON FORMAT:
+RETURN THIS EXACT JSON FORMAT:
 {
-  "isSpam": boolean,
-  "isAdvertisement": boolean,
-  "isFinancialScam": boolean,
-  "isOrganizationImpersonation": boolean,
-  "confidence": number (0-1),
-  "action": "delete_immediate" | "delete" | "warn" | "allow",
-  "reason": "string with specific explanation",
-  "category": "financial_scam" | "org_impersonation" | "data_harvesting" | "advertisement" | "legitimate" | "unknown",
-  "riskLevel": "critical" | "high" | "medium" | "low",
-  "matchedPatterns": ["array", "of", "specific", "patterns"]
+  "isSpam": true,
+  "isAdvertisement": false,
+  "isFinancialScam": false, 
+  "isOrganizationImpersonation": false,
+  "confidence": 0.85,
+  "action": "delete_immediate",
+  "reason": "Brief explanation",
+  "category": "financial_scam",
+  "riskLevel": "critical",
+  "matchedPatterns": ["pattern1", "pattern2"]
 }
 
 RULES:
+- Return ONLY the JSON object, no markdown, no extra text
+- Use double quotes for all strings
 - "delete_immediate" for financial scams, PIN requests, org impersonation
-- "delete" for clear spam and advertisements
-- "warn" for suspicious but not clearly malicious
-- "allow" for legitimate messages
-
-Focus on Kenyan scam patterns from the training data. Be strict with financial requests and organization impersonation.
+- Focus on Kenyan scam patterns
+-And if its an event or school related message, classify as legitimate
 `;
 
   try {
-    const result = await geminiModel.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    console.log("🚀 Sending to Gemini...");
     
-    // Extract JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const result = await geminiModel.generateContent(prompt);
+    console.log("✅ Got result from generateContent");
+    
+    const response = await result.response;
+    console.log("✅ Got response");
+    
+    const text = response.text().trim();
+    console.log("📥 Raw response length:", text.length);
+    
+    if (!text || text.length === 0) {
+      console.log("❌ Empty response from Gemini");
+      return getFallbackAnalysis(localAnalysis, "Empty response from Gemini");
+    }
+
+    console.log("🤖 Raw Gemini response:", text);
+    
+    let jsonText = text;
+    jsonText = jsonText.replace(/```json|```/g, '');
+    
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const analysis = JSON.parse(jsonMatch[0]);
-      console.log(`🤖 Gemini analysis: ${analysis.action} - ${analysis.reason}`);
-      console.log(`🎯 Category: ${analysis.category} | Risk: ${analysis.riskLevel}`);
+      
+      if (typeof analysis.isSpam === 'undefined') {
+        throw new Error("Missing required field: isSpam");
+      }
+      
+      console.log(`✅ Gemini analysis: ${analysis.action} - ${analysis.reason}`);
       return analysis;
     } else {
-      throw new Error("Invalid JSON response from Gemini");
+      console.log("❌ No JSON found in response");
+      return getFallbackAnalysis(localAnalysis, "No JSON in Gemini response");
     }
   } catch (error) {
-    console.error("❌ Gemini analysis failed:", error);
-    // Fallback to local analysis
-    return {
-      isSpam: localAnalysis.isHighConfidenceSpam,
-      isAdvertisement: localAnalysis.score > 50,
-      isFinancialScam: localAnalysis.flags.includes('financial_scam'),
-      isOrganizationImpersonation: localAnalysis.flags.includes('organization_impersonation'),
-      confidence: localAnalysis.score / 100,
-      action: localAnalysis.isHighConfidenceSpam ? 'delete_immediate' : 
-              localAnalysis.score >= 45 ? 'delete' : 'allow',
-      reason: 'Gemini analysis failed, using local detection',
-      category: 'unknown',
-      riskLevel: localAnalysis.score >= 70 ? 'high' : 
-                localAnalysis.score >= 45 ? 'medium' : 'low',
-      matchedPatterns: localAnalysis.details.detectedPatterns
-    };
+    console.error("❌ Gemini analysis failed:", error.message);
+    console.error("Error stack:", error.stack);
+    return getFallbackAnalysis(localAnalysis, error.message);
   }
 }
 
-// 🛡️ TAKE ACTION ON MESSAGE
-// 🛡️ TAKE ACTION ON MESSAGE - FIXED VERSION
+// 🛡️ FALLBACK ANALYSIS
+function getFallbackAnalysis(localAnalysis, reason = 'Gemini unavailable') {
+  const score = localAnalysis.score;
+  const isHighRisk = score >= 70;
+  const isMediumRisk = score >= 45;
+  
+  let category = 'unknown';
+  if (localAnalysis.flags.includes('financial_scam')) category = 'financial_scam';
+  else if (localAnalysis.flags.includes('organization_impersonation')) category = 'org_impersonation';
+  else if (localAnalysis.flags.includes('data_harvesting')) category = 'data_harvesting';
+  else if (score >= 50) category = 'advertisement';
+  else if (score < 45) category = 'legitimate';
+
+  return {
+    isSpam: isMediumRisk,
+    isAdvertisement: score >= 50 && category !== 'financial_scam',
+    isFinancialScam: localAnalysis.flags.includes('financial_scam'),
+    isOrganizationImpersonation: localAnalysis.flags.includes('organization_impersonation'),
+    confidence: Math.min(score / 100, 0.95),
+    action: isHighRisk ? 'delete_immediate' : 
+            isMediumRisk ? 'delete' : 'allow',
+    reason: reason,
+    category: category,
+    riskLevel: isHighRisk ? 'high' : isMediumRisk ? 'medium' : 'low',
+    matchedPatterns: localAnalysis.details.detectedPatterns.slice(0, 3)
+  };
+}
+
+// 🛡️ HANDLE SPAM MESSAGE
 async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
   const from = message.key.remoteJid;
   const sender = message.key.participant || from;
@@ -359,15 +360,11 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
 
   console.log(`🛡️ Processing message from ${sender}: ${messageText.substring(0, 50)}...`);
 
-  // Update spam statistics
   spamStats.totalProcessed++;
   if (localAnalysis.isSuspicious) spamStats.localFlagged++;
   if (geminiAnalysis) spamStats.geminiAnalyzed++;
 
-  // Check if bot is admin in the group
   const groupMetadata = await sock.groupMetadata(from);
-  
-  // Use ADMIN_JID_CHECK as the bot's JID (the account that's logged in)
   const botJid = normalizeJid(ADMIN_JID_CHECK);
   
   const isBotAdmin = groupMetadata.participants.some(
@@ -380,7 +377,7 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
   if (!isBotAdmin) {
     console.log("❌ Bot is not admin in this group, cannot take action");
     await sock.sendMessage(ADMIN_JID_SEND, {
-      text: `⚠️ *SPAM DETECTED* (Cannot Act)\n\n*Group:* ${groupMetadata.subject}\n*Bot Status:* ❌ Not Admin\n\n*Action Required:* Make ${botJid} an admin in this group to enable spam deletion and user removal.\n\n*Spam Score:* ${localAnalysis.score}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*From:* ${sender}\n*Message:* ${messageText}`
+      text: `⚠️ *SPAM DETECTED* (Cannot Act)\n\n*Group:* ${groupMetadata.subject}\n*Bot Status:* ❌ Not Admin\n\n*Spam Score:* ${localAnalysis.score}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*From:* ${sender}\n*Message:* ${messageText}`
     });
     return;
   }
@@ -392,41 +389,28 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
   };
 
   try {
-    // 🚨 IMMEDIATE DELETE ACTIONS
     if (finalAnalysis.action === 'delete_immediate' || 
         finalAnalysis.riskLevel === 'critical' ||
         localAnalysis.score >= 85) {
       
-      // Delete the message
-      await sock.sendMessage(from, {
-        delete: message.key
-      });
+      await sock.sendMessage(from, { delete: message.key });
       console.log("✅ Deleted high-risk spam message");
       spamStats.messagesDeleted++;
 
-      // Remove user from group for critical threats
-      await sock.groupParticipantsUpdate(
-        from,
-        [sender],
-        "remove"
-      );
-      console.log(`🚫 Removed user ${sender} from group for critical spam`);
+      await sock.groupParticipantsUpdate(from, [sender], "remove");
+      console.log(`🚫 Removed user ${sender} from group`);
       spamStats.usersRemoved++;
 
-      // Notify admin
       await sock.sendMessage(ADMIN_JID_SEND, {
         text: `🚨 *CRITICAL SPAM ALERT*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Action:* ✅ Message deleted & user removed\n*Risk Level:* ${finalAnalysis.riskLevel}\n*Local Score:* ${localAnalysis.score}\n*Reason:* ${finalAnalysis.reason}\n*Flags:* ${localAnalysis.flags.join(', ')}\n\n*Message:* ${messageText}`
       });
 
     } 
-    // 🗑️ STANDARD DELETE ACTIONS
     else if (finalAnalysis.action === 'delete' || 
              finalAnalysis.riskLevel === 'high' ||
              localAnalysis.score >= 60) {
       
-      await sock.sendMessage(from, {
-        delete: message.key
-      });
+      await sock.sendMessage(from, { delete: message.key });
       console.log("✅ Deleted spam message");
       spamStats.messagesDeleted++;
 
@@ -435,11 +419,9 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
       });
 
     } 
-    // ⚠️ WARNING ACTIONS
     else if (finalAnalysis.action === 'warn' || 
              (finalAnalysis.riskLevel === 'medium' && localAnalysis.score >= 45)) {
       
-      // Send warning to the group
       await sock.sendMessage(from, {
         text: `⚠️ *Community Guidelines Reminder*\n\nPlease avoid sending promotional content, financial offers, or suspicious links in this group. Repeated violations may result in removal.\n\n*Detected:* ${finalAnalysis.reason}`
       });
@@ -450,7 +432,6 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
       });
 
     } 
-    // 📊 MONITOR ONLY (suspicious but not actionable)
     else if (localAnalysis.isSuspicious) {
       await sock.sendMessage(ADMIN_JID_SEND, {
         text: `👀 *Suspicious Message Monitored*\n\n*Group:* ${groupMetadata.subject}\n*User:* ${sender}\n*Score:* ${localAnalysis.score}\n*Flags:* ${localAnalysis.flags.join(', ')}\n*Action:* Monitoring only\n\n*Message:* ${messageText}`
@@ -465,7 +446,7 @@ async function handleSpamMessage(message, localAnalysis, geminiAnalysis) {
   }
 }
 
-// 🚀 INITIALIZE WHATSAPP CONNECTION
+// 🚀 INITIALIZE WHATSAPP
 async function startWhatsApp() {
   const { version } = await fetchLatestBaileysVersion();
   const { state, saveCreds } = await useMultiFileAuthState("auth_info");
@@ -477,7 +458,6 @@ async function startWhatsApp() {
     browser: ["WA Protect", "Chrome", "1.0"],
   });
 
-  // 🔄 Connection updates
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -502,84 +482,65 @@ async function startWhatsApp() {
     }
   });
 
-  // 💬 MESSAGE PROCESSING WITH SPAM DETECTION
-  // 💬 FIXED MESSAGE PROCESSING WITH SPAM DETECTION
-sock.ev.on("messages.upsert", async (m) => {
-  const msg = m.messages[0];
-  if (!msg.message || !msg.key.remoteJid) return;
+  sock.ev.on("messages.upsert", async (m) => {
+    const msg = m.messages[0];
+    if (!msg.message || !msg.key.remoteJid) return;
 
-  const from = msg.key.remoteJid;
-  const sender = msg.key.participant || from;
+    const from = msg.key.remoteJid;
+    const sender = msg.key.participant || from;
 
-  // Ignore messages from ourselves (bot's own messages)
-  if (msg.key.fromMe) {
-    return;
-  }
+    if (msg.key.fromMe) return;
 
-  const text = msg.message.conversation ||
-              msg.message.extendedTextMessage?.text ||
-              "";
+    const text = msg.message.conversation ||
+                msg.message.extendedTextMessage?.text ||
+                "";
 
-  // 🧠 HANDLE PRIVATE MESSAGES (DMs) - Including Admin Commands
-  if (!from.endsWith('@g.us')) {
-    console.log(`📩 Private message from ${sender}: ${text.substring(0, 50)}...`);
-    
-    // Check if it's from admin
-    if (normalizeJid(sender) === normalizeJid(ADMIN_JID_SEND)) {
-      const command = text.toLowerCase().trim();
+    if (!from.endsWith('@g.us')) {
+      console.log(`📩 Private message from ${sender}: ${text.substring(0, 50)}...`);
       
-      if (command === "list groups") {
-        console.log("✅ Processing 'list groups' command");
-        await sendGroupListToAdmin();
-        return;
-      } 
-      else if (command === "spam stats") {
-        console.log("✅ Processing 'spam stats' command");
-        await sendSpamStats();
-        return;
-      } 
-      else if (command.startsWith("test local ")) {
-        console.log("✅ Processing 'test local' command");
-        await testLocalDetection(text.replace("test local", "").trim());
-        return;
+      if (normalizeJid(sender) === normalizeJid(ADMIN_JID_SEND)) {
+        const command = text.toLowerCase().trim();
+        
+        if (command === "list groups") {
+          await sendGroupListToAdmin();
+          return;
+        } 
+        else if (command === "spam stats") {
+          await sendSpamStats();
+          return;
+        } 
+        else if (command.startsWith("test local ")) {
+          await testLocalDetection(text.replace("test local", "").trim());
+          return;
+        }
+        else {
+          await sock.sendMessage(ADMIN_JID_SEND, {
+            text: `❓ Unknown command. Available commands:\n\n• *list groups* — See all groups\n• *spam stats* — Protection statistics\n• *test local <message>* — Test detection`
+          });
+          return;
+        }
       }
-      else {
-        // Unknown command from admin
-        console.log(`⚠️ Unknown command from admin: ${command}`);
-        await sock.sendMessage(ADMIN_JID_SEND, {
-          text: `❓ Unknown command. Available commands:\n\n• *list groups* — See all groups\n• *spam stats* — Protection statistics\n• *test local <message>* — Test detection`
-        });
-        return;
-      }
+      
+      console.log(`⚠️ Ignoring private message from non-admin: ${sender}`);
+      return;
     }
-    
-    // Not from admin, ignore other private messages
-    console.log(`⚠️ Ignoring private message from non-admin: ${sender}`);
-    return;
-  }
 
-  // 🛡️ SPAM DETECTION FOR GROUP MESSAGES ONLY
-  if (text.trim().length === 0) return; // Ignore empty messages
+    if (text.trim().length === 0) return;
 
-  console.log(`📨 Message in group from ${sender}: ${text.substring(0, 50)}...`);
-  
-  // Step 1: Local spam check with trained algorithm
-  const localAnalysis = localSpamCheck(text, sender);
-  
-  // Step 2: Decision tree based on local analysis
-  if (localAnalysis.isHighConfidenceSpam) {
-    console.log("🚨 High confidence spam detected, taking immediate action...");
-    await handleSpamMessage(msg, localAnalysis, null);
-  } 
-  else if (localAnalysis.isSuspicious) {
-    console.log("🔍 Suspicious message detected, sending to Gemini...");
-    const geminiAnalysis = await analyzeWithGemini(text, localAnalysis);
+    console.log(`📨 Message in group from ${sender}: ${text.substring(0, 50)}...`);
     
-    // Step 3: Take action based on combined analysis
-    await handleSpamMessage(msg, localAnalysis, geminiAnalysis);
-  }
-  // Messages with score < 45 are allowed automatically
-});
+    const localAnalysis = localSpamCheck(text, sender);
+    
+    if (localAnalysis.isHighConfidenceSpam) {
+      console.log("🚨 High confidence spam detected, taking immediate action...");
+      await handleSpamMessage(msg, localAnalysis, null);
+    } 
+    else if (localAnalysis.isSuspicious) {
+      console.log("🔍 Suspicious message detected, sending to Gemini...");
+      const geminiAnalysis = await analyzeWithGemini(text, localAnalysis);
+      await handleSpamMessage(msg, localAnalysis, geminiAnalysis);
+    }
+  });
 
   sock.ev.on("creds.update", saveCreds);
 }
@@ -636,7 +597,6 @@ API Call Savings: ~${(100 - (spamStats.geminiAnalyzed / spamStats.totalProcessed
   await sock.sendMessage(ADMIN_JID_SEND, { text: statsMessage });
 }
 
-// 🧪 TEST LOCAL DETECTION
 async function testLocalDetection(testMessage) {
   if (!testMessage) {
     await sock.sendMessage(ADMIN_JID_SEND, {
@@ -660,7 +620,6 @@ ${analysis.details.detectedPatterns.map(p => `• ${p}`).join('\n')}`;
   await sock.sendMessage(ADMIN_JID_SEND, { text: resultMessage });
 }
 
-// 📋 EXISTING FUNCTIONS (keep your original implementations)
 async function getGroupsList() {
   try {
     const groups = await sock.groupFetchAllParticipating();
@@ -766,7 +725,7 @@ app.listen(PORT, () => {
   console.log(`🚀 WA Protect Server running on port ${PORT}`);
   console.log(`🛡️ Trained Spam Protection System Activated`);
   console.log(`🎯 Local detection algorithm trained on 20 Kenyan scam patterns`);
-  console.log(`🤖 Gemini AI: ${GEMINI_API_KEY ? 'Enabled' : 'Disabled'}`);
+  console.log(`🤖 Gemini AI: ${GEMINI_API_KEY ? 'Enabled ✅' : 'Disabled ⚠️'}`);
 });
 
-startWhatsApp().catch(console.error); 
+startWhatsApp().catch(console.error);
